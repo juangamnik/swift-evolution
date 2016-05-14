@@ -19,7 +19,7 @@ The Swift standard library currently makes no special effort to assist developer
 
 The Swift standard library should provide three abstractions to facilitate working with data:
 
-* A `Data` protocol providing an abstract interface modeling a data object as a collection of bytes. Types that conform to `Data` can choose to model themselves explicitly as `Collection`s; otherwise, several view types provide a collection interface to various representations of the underlying data.
+* A `Data` protocol providing an abstract interface modeling a data object as a collection of bytes. Several view types provide a collection interface to various representations of the underlying data.
 * An extension to `Array<UInt8>` allowing an array to model a contiguous byte buffer, conforming to `Data`. This can be referred to by the generic typealias `DataArray`.
 * A `DataContainer` value type which provides contiguous or non-contiguous storage, conforming to `Data`, and also conforming to `Collection` and related protocols in its own right.
 
@@ -40,7 +40,8 @@ protocol Data : Hashable, CustomStringConvertible {
 	// -- Initializers -- (no default implementations)
 
 	// Instantiate data from a sequence of integer values.
-	init<T: SequenceType where T.Generator.Element == IntegerType>(_: T, additionalCapacity: Int = 0)
+	init<T: SequenceType where T.Generator.Element == UnsignedIntegerType>(_: T, additionalCapacity: Int = 0)
+	init<T: SequenceType where T.Generator.Element == SignedIntegerType>(_: T, additionalCapacity: Int = 0)
 
 	// Instantiate data from a base-64 encoded string.
 	init?(base64String: String, ignoreUnknownCharacters: Bool = true, additionalCapacity: Int = 0)
@@ -127,13 +128,19 @@ protocol Data : Hashable, CustomStringConvertible {
 }
 ```
 
-A number of views on a data object are also defined. Data can be directly manipulated in the form of signed and unsigned bytes, and can be read as hex tuples or base-64 encoded characters. (Implementation and API may change based on what enhanced generics features make it into Swift 3.0.)
+A number of views on a data object are also defined. Data can be directly manipulated in the form of signed and unsigned bytes, and can be read as hex tuples or base-64 encoded characters.
 
-**NOTE**: Ideally, `Data` should inherit from `RandomAccessCollection` and force the associated type `Generator.Element` to be `UInt8`. This turns a `Data` instance into a collection of `UInt8`s by default, greatly simplifying parts of the API. If this does become possible, then `DataUInt8View` becomes unnecessary. However, doing so may make it difficult to conform `[Int8]` to `Data`, if this should be desirable.
+Note that this proposal chooses not to make `Data` force a type to conform to `Collection`. Instead, it defines views into the data that themselves act as `Collection`s. There is precedent for this sort of design: Swift's `String` type behaves the same way, although because of different reasons, and `NSData` is not directly iterable. There are a few reasons why I believe this is the correct choice.
+
+* Swift's type system would need to add features to allow `Data` to force conforming types to conform to `Collection` correctly (i.e. with the elements being `UInt8`s). These features aren't on the roadmap and it's not clear that they are widely useful or well-founded theoretically.
+
+* Even if it were possible, doing so would break the symmetry between the user-facing signed byte and unsigned byte APIs.
+
+* Doing so would prohibit certain types that might be considered a natural fit for `Data` to conform, such as `[Int8]`.
+
+However, individual types conforming to `Data` can themselves choose to also conform to `Collection`, if it makes sense for them to do so. This is true for both the `DataArray` and `DataContainer` types defined below.
 
 **NOTE**: Ideally, Swift should allow nested types inside a protocol definition. If that becomes possible, the views below should lose their `Data` prefixes and become nested types within the `Data` protocol.
-
-**TODO**: What is the best way to handle slicing? `DataArray` can use the default `ArraySlice`, or perhaps a `DataSlice` protocol that `ArraySlice<UInt8>` can conditionally conform to. In the latter case, a private `DataContainerSlice` that conforms to `DataSlice` can be provided.
 
 
 ```
@@ -191,6 +198,8 @@ extension Data {
 
 `DataArray` provides the functionality of a contiguous byte buffer in other languages, and also provides all the existing capabilities of Swift's `Array` type.
 
+**NOTE**: It's possible that we may want to conform `ContiguousArray<UInt8>` instead of `[UInt8]`. However, with the changes to implicit bridging between Objective-C and Swift types this might not be necessary. It may also be desirable to conform `ContiguousArray<UInt8>` in addition to `[Int8]`, with identical APIs.
+
 **NOTE**: It's possible we may want separate conformances for `[UInt8]` and `[Int8]`. Generalizing the provided API for signed bytes is straightforward.
 
 **NOTE**: One possible feature that `DataArray` may provide is the option to create an unsafe `Array` which is backed directly by a buffer pointer. See notes in the dummy comments below.
@@ -225,7 +234,7 @@ extension Array<UInt8> : Data {
 
 ### `DataContainer` struct
 
-The `DataContainer` struct provides contiguous or non-contiguous storage of data for applications where performing append operations without copying (or other similar tasks) is important for performance. Its design is based off `libdispatch`'s `dispatch_data_t` abstraction.
+The `DataContainer` struct provides contiguous or non-contiguous storage of data for applications where performing append operations without copying (or other similar tasks) is important for performance, or when fine-grained control over the layout or copying characteristics of the underlying memory buffer is desired. Its design is based off `libdispatch`'s `dispatch_data_t` abstraction.
 
 Conceptually, `DataContainer` is backed by one or more `_ArrayBuffer<UInt8>`s. In a similar manner to `dispatch_data_t`, `DataContainer` can be implemented as a list of one or more references to array buffers, and associated metadata. This has two advantages:
 
@@ -237,14 +246,14 @@ Conceptually, `DataContainer` is backed by one or more `_ArrayBuffer<UInt8>`s. I
 struct DataContainer : Data {
 	
 	// Instantiate an empty DataContainer
-	init(initialCapacity: Int? = nil)
+	init(initialCapacity: Int? = nil, keepContiguous: Bool = false)
 
 	// Instantiate a DataContainer from a DataArray.
-	init(_ dataArray: DataArray, additionalCapacity: Int = 0)
+	init(_ dataArray: DataArray, keepContiguous: Bool = false, additionalCapacity: Int = 0)
 
 	// Instantiate a DataContainer from another DataContainer, possibly
 	// flattening multiple buffers into a single contiguous buffer.
-	init(_ dataContainer: DataContainer, flatten: Bool = false, additionalCapacity: Int = 0)
+	init(_ dataContainer: DataContainer, keepContiguous: Bool = false, flatten: Bool = false, additionalCapacity: Int = 0)
 
 	// Whether or not the DataContainer is represented by a single underlying
 	// buffer or not.
@@ -269,6 +278,12 @@ No direct impact, this is an additive feature. Code that is using Foundation's `
 ## Alternatives considered
 
 The straightforward alternative is allowing Foundation to provide `NSData` as Swift's sole means of higher-level binary data representation and manipulation.
+
+
+## Research
+
+* [`ByteBuffer` API in Java](https://docs.oracle.com/javase/7/docs/api/java/nio/ByteBuffer.html)
+* [*NSData, My Old Friend*](http://robnapier.net/nsdata), by Rob Napier (from October 2015)
 
 -------------------------------------------------------------------------------
 
