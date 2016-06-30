@@ -1,15 +1,13 @@
 # Enhanced Existential Support
 
 * Proposal: [SE-NNNN](https://github.com/apple/swift-evolution/blob/master/proposals/NNNN-name.md)
-* Authors: [Douglas Gregor](https://github.com/DougGregor), [Joe Groff](https://twitter.com/jckarter), Austin Zheng, et al.
+* Authors: [Douglas Gregor](https://github.com/DougGregor), [Joe Groff](https://twitter.com/jckarter), Austin Zheng
 * Status: **[Awaiting review](#rationale)**
 * Review manager: TBD
 
 ## Introduction
 
-*TODO*: Rewrite document using whatever syntax SE-0095 decides upon.
-
-Swift's support for existential types is currently quite limited: one or more protocols can be composed using the `Any<>` syntax. We propose, in the spirit of [*Completing Generics*](https://github.com/apple/swift/blob/master/docs/GenericsManifesto.md), to add support to Swift for describing more complex existential types, including those involving protocols with associated types.
+Swift's support for existential types is currently quite limited: two or more protocols can be composed using the `P1 & P2 & P3` syntax. We propose, in the spirit of [*Completing Generics*](https://github.com/apple/swift/blob/master/docs/GenericsManifesto.md), to add support to Swift for describing more complex existential types, including those involving protocols with associated types.
 
 ## Acknowledgements
 
@@ -56,7 +54,7 @@ Almost all of these problems can be solved by **generalizing the use of existent
 
 	```swift
 	// "Any type conforming to Collection, whose Elements are Ints"
-	var a = Any<Collection where .Element == Int>
+	var a = Collection where .Element == Int
 	a = [1, 2, 3, 4]
 	a = Set([4, 5, 6, 7])
 	```
@@ -64,7 +62,7 @@ Almost all of these problems can be solved by **generalizing the use of existent
 	Generic typealiases provide an opportunity to make such existential types even more ergonomic:
 
 	```swift
-	typealias AnyCollection<T> = Any<Collection where .Element == T>
+	typealias AnyCollection<T> = Collection where .Element == T
 	// Similar typealiases for the other two Collections, and for Sequence...
 
 	let a : AnyCollection<Int> = [1, 2, 3, 4]
@@ -76,7 +74,7 @@ Almost all of these problems can be solved by **generalizing the use of existent
 
 	```swift
 	// "Any type which is a class"
-	typealias AnyObject = Any<class>
+	typealias AnyObject = class
 	```
 
 3. **Dynamic yet typesafe behavior**.
@@ -122,25 +120,19 @@ Almost all of these problems can be solved by **generalizing the use of existent
 
 ## Proposed solution
 
-An improved version of the `Any<...>` construct will serve as the primary method for declaring an existential type.
+An improved version of the `P1 & P2` construct will serve as the primary method for declaring an existential type.
 
-Within the angle brackets `<` and `>` are one or more *requirements*. Requirements are separated by commas. After the requirements is an optional `where` clause, in which constraints are placed upon any associated types introduced by previous requirements.
-
-*TODO*: pending SE-0095, briefly describe how `Any` works, and how single-protocol Any<> works
-
-`Any<...>` with a class requirement but no protocol requirements is prohibited and will result in a compiler warning to use that class directly. For example, `Any<Any<NSView>>`, `Any<NSObject, Any<NSView>>`, and `Any<NSView>` are all prohibited.
+An existential type is comprised of one or more *requirements*. Requirements are separated by `&`. After the requirements is an optional `where` clause, in which constraints are placed upon any associated types introduced by previous requirements.
 
 The following requirements are valid. Detailed descriptions follow.
 
 * **Any-class requirement**. This must be the first requirement, if present. This requirement consists of the keyword `class`, and requires the existential to be of any class type.
 
-* **Class requirement**. This must be the first requirement, if present. This requirement consists of the name of a class type, and requires the existential to be of a specific class or its subclasses.
+* **Class requirement**. This must be the first requirement, if present. This requirement consists of the name of a class type, and requires the existential to be of a specific class or its subclasses. It cannot be the only requirement.
 
 * **Protocol requirement**. This requirement consists of the name of a protocol, and requires the existential to conform to the protocol.
 
-* **Nested `Any<...>`**. This requirement consists of another `Any<...>` construct.
-
-A summary of the `Any<...>` grammar can be found in the *Detailed Design* section.
+* **Nested existential**. This requirement consists of another existential construct, delineated using `()`.
 
 ### Any-class requirement
 
@@ -150,7 +142,7 @@ Example:
 
 ```swift
 // Can be any class type that conforms to SomeProtocol.
-let a : Any<class, SomeProtocol>
+let a : class
 ```
 
 An existential that declares a requirement which is a `class`-only protocol can also declare the any-class requirement, although doing so is redundant:
@@ -158,8 +150,8 @@ An existential that declares a requirement which is a `class`-only protocol can 
 ```swift
 protocol A : class { }
 
-// Acceptable, but exactly the same as Any<A>, or just A
-let a : Any<class, A>
+// Acceptable, but exactly the same as just A
+let a : class & A
 ```
 
 ### Class requirement
@@ -171,7 +163,7 @@ Example:
 ```swift
 // Can be any class type that is a UIView or a subclass of UIView,
 // that also conforms to SomeProtocol.
-let a : Any<UIView, SomeProtocol>
+let a : UIView & SomeProtocol
 ```
 
 ### Protocol requirement
@@ -182,99 +174,132 @@ Example:
 
 ```swift
 // Can be any type that conforms to both Equatable and Streamable.
-let a : Any<Equatable, Streamable>
+let a : Equatable & Streamable
 ```
 
-### Nested `Any<...>`
+### Nested typealias existential
 
-Places a constraint on the existential to meet all constraints imposed by the nested `Any<...>` construct.
+Places a requirement on the existential to meet all requirements imposed by the existential named by the typealias. (A typealias whose type is not an existential does not qualify as a nested typealias existential requirement.)
 
 Example:
 ```swift
+typealias Foo = ProtocolB & ProtocolC
+
 // Can be any type that conforms to ProtocolA, ProtocolB, and ProtocolC.
-let a : Any<ProtocolA, Any<ProtocolB, ProtocolC>>
+let a : ProtocolA & Foo
 ```
 
-A nested `Any<...>` may declare a class or any-class constraint, even if its parent `Any<...>` contains a class or any-class constraint, or a sibling `Any<...>` constraint declares a class or any-class constraint. However, one of the classes must be a subclass of every other class declared within such constraints, or all the classes must be the same. This class, if it exists, is chosen as the `Any<...>` construct's constraint. (See *Existential Type Equivalence*, below.)
+The existential named by the typealias may declare a class or any-class constraint, even if the containing existential also declares such a constraint. However, one of the classes must be a subclass of every other class declared within such constraints, or all the classes must be the same. This class, if it exists, is chosen as the existential's constraint. (See *Existential Type Equivalence*, below.)
 
 Examples:
 
 ```swift
+typealias SpecialView = UIView & ProtocolA
+typealias SpecialTableView = UITableView & SpecialView
+
 // Can be any type that is a UITableView conforming to ProtocolA.
 // UITableView is the most specific class, and it is a subclass of the other
 // two classes.
-let a : Any<UIScrollView, Any<UITableView, Any<UIView, ProtocolA>>>
+let a : UIScrollView & SpecialTableView
 
-// Allowed, but pointless.
-// Identical to Any<ProtocolA, ProtocolB>
-let b : Any<Any<ProtocolA, ProtocolB>>
+typealias SpecialData = NSData & ProtocolA
 
 // NOT ALLOWED: no class is a subclass of all the other classes. This cannot be
 // satisfied by any type.
-let c : Any<NSObject, Any<UIView, Any<NSData, ProtocolA>>>
+let b : UIView & SpecialData
 ```
 
-Likewise, a nested `Any<...>` may declare a protocol constraint involving a protocol that has already been constrained by the parent or a sibling `Any<...>` clause. However, if a protocol is constrained in such a way that an associated type has two contradictory same-type constraints or subclass constraints, this is an error:
+Likewise, a nested typealias existential may declare a protocol constraint involving a protocol that has already been constrained by the parent or a sibling nested typealias existential clause. However, if a protocol is constrained in such a way that an associated type has two contradictory same-type constraints or subclass constraints, this is an error:
 
 ```swift
+typealias CollectionOfInts = Collection where .Element == Int
+
 // NOT ALLOWED
 // This is impossible to fufill. A collection's elements cannot be both strings
 // and integers at the same time.
-let a : Any<Collection where .Element == String, Any<Collection where .Element == Int>>
+let a : CollectionOfInts where .Element == String
 ```
 
-Using typealiases, it is possible for `Any<...>` existentials to be composed. This allows API requirements to be expressed in a more natural, modular way:
+The composition of existentials via typealiases allows API requirements to be expressed in a more natural, modular way:
 
 ```swift
 // Any custom UIViewController that serves as a delegate for a table view.
-typealias CustomTableViewController = Any<UIViewController, UITableViewDataSource, UITableViewDelegate>
+typealias CustomTableViewController = UIViewController & UITableViewDataSource & UITableViewDelegate
 
 // Pull in the previous typealias and add more refined constraints.
-typealias PiedPiperResultsViewController = Any<CustomTableViewController, PiedPiperListViewController, PiedPiperDecompressorDelegate>
+typealias PiedPiperResultsViewController = CustomTableViewController & PiedPiperListViewController & PiedPiperDecompressorDelegate
 ```
 
 However, recursive (self-referential) nested typealiases are not allowed.
 
-An `Any<...>`'s `where` clause may reference protocols defined within nested `Any<...>` requirements, but the reverse is not true: an `Any<...>`'s `where` clause cannot reference protocols in the parent `Any<...>`.
+A nested typealias existential's `where` clause may reference protocols defined within further-nested existential typealias requirements, but the reverse is not true: a nested typealias existential's `where` clause cannot reference protocols in the parent existential definition.
 
-Any `Any<...>` containing nested `Any<...>`s can be conceptually 'flattened' and written as an equivalent `Any<...>` containing no nested `Any<...>` requirements. The two representations are exactly interchangeable.
+Any existential type containing nested typealias existential requirements can be conceptually 'flattened' and written as an equivalent existential containing no nested typealias existential requirements. The two representations are exactly interchangeable.
 
-### `where` clause
+### `where` clause (typealiases, variables, and properties)
 
-An `Any<...>` existential can optionally have a single `where` clause. If this `where` clause exists, it is placed following all the requirements.
+An existential type spelled out as the type of a local variable, property, or typealias can optionally have a single `where` clause. If this `where` clause exists, it is placed following all the requirements.
 
-(Note that an existential can have a `where` clause, but it might also have nested `Any<...>` requirements that have their own `where` clauses. This is allowed.)
+(Note that an existential can have a `where` clause, but it might also have nested existential requirements that have their own `where` clauses. This is allowed.)
 
 The `where` clause contains one or more constraints. Constraints must involve the associated types of the previously required protocols. `Self` cannot be constrained.
 
-The acceptable constraints following the `where` clause are identical to those following the `where` clause on a constrained extension or generic function/type definition. In each case `X` must be the name of an associated type defined on one of the `Any<...>` existential's component protocols:
+The acceptable constraints following the `where` clause are identical to those following the `where` clause on a constrained extension or generic function/type definition. In each case `X` must be the name of an associated type defined on one of the existential's component protocols:
 
 * Type equality constraint: `X == ConcreteType`
 * Type equality constraint: `X == AnotherAssociatedType`
 * Type conformance constraint: `X : SomeProtocol`
 * Type inheritance constraint: `X : SomeClass`
-* Composite constraint: `X : Any<...>`
+* Composite constraint: `X : P1 & P2`
 
 Associated types are referred to with a leading dot, as in the following example. Note that any given type may only have one associated type with a given name (for example, given protocols `Foo` and `Bar`, both with the associated type `Baz`, a type cannot conform to both `Foo` and `Bar` but satisfy `Foo.Baz` and `Bar.Baz` with different types).
 
 ```swift
 // Can be any Collection whose elements are Ints.
-let a : Any<Collection where .Element == Int>
+let a : Collection where .Element == Int
 
 // Can be any Collection whose elements are Streamable; the Collection itself 
 // must also be Streamable.
-let b : Any<Streamable, Collection where .Element : Streamable> 
+let b : Streamable & Collection where .Element : Streamable
 ```
 
 Associated types used within the `where` clause must belong to one of the protocols previously declared in a requirement. For example, this is wrong:
 
 ```swift
 // NOT ALLOWED
-// RawRepresentable wasn't used in a protocol requirement anywhere in the
-// existential, so we can't use its RawValue. We can only use the associated
-// types of 'Collection', since that's the only protocol the existential is
-// required to conform to.
-let a : Any<Collection where .Element == .RawValue>
+// Collection doesn't have an associated type named RawValue, so we can't use
+// it to define constraints.
+let a : Collection where .Element == .RawValue
+```
+
+### `where` clause (arguments and return values)
+
+An existential defined as the type of a function (or function-like member) argument or return value cannot be defined with a `where` clause attached directly to the existential declaration.
+
+Instead, a `where` clause can be defined following the function-like member's return value (or argument list, if no equivalent to the return value exists), just as if the member were generic. All existential constraints can be placed in this `where` clause. These constrains can exist alongside generic type parameter constraints if such exist.
+
+An existential's associated types are fully qualified, with the name of the existential argument (or `return`, for the return value) followed by a dot and then the name of the associated type.
+
+```swift
+// Note the single 'where' clause, which places constraints on all three
+// existentials.
+func doSomething(x: Collection, y: Collection) -> Collection
+  where x.Element == Int, y.Element == Int, return.Element == Double
+{
+	// ...
+}
+```
+
+In such a case, it is not allowed to define constraints that create a relation between different existential values:
+
+```swift
+// NOT ALLOWED; each constraint can reference at most a single existential
+// value (argument or return value)
+func doSomething(x: Collection, y: Collection)
+	where x.Element == y.Element
+{
+	// ...
+}
 ```
 
 ### Analogy to generics
@@ -282,7 +307,7 @@ let a : Any<Collection where .Element == .RawValue>
 Given the requirements and constraints described above, it should be apparent that an existential type signature encapsulates much of the same information as a generic type signature describing a single generic type parameter:
 
 ```swift
-let a : Any<SomeClass, SomeProtocol, where .Assoc1 == SomeType, .Assoc2 : AnotherProtocol>
+let a : SomeClass & SomeProtocol where .Assoc1 == SomeType, .Assoc2 : AnotherProtocol
 
 func foo<T>(z: T) where T : SomeClass, T : SomeProtocol, T.Assoc1 == SomeType, T.Assoc2 : AnotherProtocol {
 	// ...
@@ -302,7 +327,7 @@ A constant value of existential type may have zero or more associated types atta
 An example follows:
 
 ```swift
-let a : Any<Collection>
+let a : Collection
 
 // A variable whose type is the Index associated type of the underlying
 // concrete type of 'a'.
@@ -316,7 +341,7 @@ let theElement : a.Element = ...
 The associated types of an existential are only accessible upon constant values (`let` properties or local bindings; non-`inout` function arguments):
 
 ```swift
-var a : Any<Collection>
+var a : Collection
 // NOT ALLOWED; a.Index can change since 'a' is a var
 let index : a.Index
 ```
@@ -326,7 +351,7 @@ Any of an existential's associated types, or any variable of such a type, is onl
 ```swift
 // This is expressly prohibited. "a.Element" is meaningless outside the context
 // of the function body.
-func doSomething(a: Any<Collection>) -> a.Element {
+func doSomething(a: Collection) -> a.Element {
 	return a.first!
 }
 ```
@@ -342,7 +367,7 @@ func doSomething<T : MyProtocol>(arg: T) {
 	arg.foo()
 }
 
-func doSomethingElse(a: Any<Collection where .Element : MyProtocol>) {
+func doSomethingElse(a: Collection) where a.Element : MyProtocol {
 	let firstElement : a.Element = a.first!
 
 	// This is okay
@@ -359,7 +384,7 @@ protocol MyProtocol {
 	func bar(_ y: [T]) -> String
 }
 
-func doSomething(a: Any<MyProtocol>) -> String {
+func doSomething(a: MyProtocol) -> String {
 	// Create an array of "a.T" to hold return values from foo()
 	var foos : [a.T] = []
 	for i in 0..<10 {
@@ -386,7 +411,7 @@ Here is an example of a function that does useful work exclusively through the u
 ```swift
 // Given a mutable collection, swap its first and last items.
 // Not a generic function. 
-func swapFirstAndLast(inout collection: Any<BidirectionalMutableCollection>) {
+func swapFirstAndLast(inout collection: BidirectionalMutableCollection) {
 	let c = collection
 	// firstIndex and lastIndex both have type "c.Index"
 	guard let firstIndex = c.startIndex,
@@ -411,7 +436,7 @@ It is often important to convert between a real type (e.g. nominal and structura
 A real type can only be `as`-casted into an associated type if the existential constrained that associated type to be a concrete type with a same-type constraint. An example follows:
 
 ```swift
-let a : Any<BidirectionalMutableCollection where .Element == String> = ...
+let a : BidirectionalMutableCollection where .Element == String = ...
 let i : String = "West Meoley"
 let i2 = i as a.Element
 
@@ -424,7 +449,7 @@ let elementsAreSame = a[a.startIndex] == i
 However, it should always be possible to `as?`-cast from a real type to an associated type, no matter how loosely the associated type is constrained:
 
 ```swift
-let a : Any<BidirectionalMutableCollection> = ...
+let a : BidirectionalMutableCollection = ...
 let i : String = "West Meoley"
 
 let elementsAreSame : Bool
@@ -454,7 +479,7 @@ protocol Foo {
 	func someFunc() -> AssocType
 }
 
-let a : Any<Foo> = ...
+let a : Foo = ...
 
 let result : a.AssocType = a.someFunc()
 
@@ -477,12 +502,12 @@ protocol Foo {
 	func someFunc() -> AssocType
 }
 
-let a : Any<Foo> = ...
+let a : Foo = ...
 
 let result : a.AssocType = a.someFunc()
 
 // Okay
-let r1 = result as Any<Protocol1, Streamable>
+let r1 = result as Protocol1 & Streamable
 
 // Okay, because String conforms to both Protocol1 and Streamable
 // (Note that this is a conditional cast and could fail at runtime, returning 
@@ -503,7 +528,7 @@ protocol Foo {
 	func someFunc() -> AssocType?
 }
 
-let a : Any<Foo where .AssocType : Protocol1> = ...
+let a : Foo where .AssocType : Protocol1 = ...
 
 let result : a.AssocType? = a.someFunc()
 
@@ -514,7 +539,7 @@ let r1 = result as Protocol1?
 
 ## Usage
 
-An `Any<...>` existential type can be trivially used in any of the following situations:
+An existential type can be trivially used in any of the following situations:
 
 * Local variable type
 * Property type
@@ -534,21 +559,21 @@ Existentials can be used in generic declarations in the following ways:
 * As a parameter value or return value for a generic function or subscript, or a parameter value for a generic initializer. In this case generic type variables are only allowed to be used in the existential type's `where` clause constraints:
 
 	```swift
-	func myFunc<T>(x: T, y: T) -> Any<Collection where .Element == T> { ... }
+	func myFunc<T>(x: T, y: T) -> Collection where return.Element == T { ... }
 	```
 
 * As the type of a property in a generic type. Again, generic type variables are only allowed to be used in the existential type's `where` clause constraints:
 
 	```swift
 	class MyClass<T> {
-		var collection : Any<Collection where .Element == T> = []
+		var collection : Collection where .Element == T = []
 	}
 	```
 
 * As the object of a constraint in a generic declaration's `where` clause. However, this is not actually an existential, even though its syntax is identical. Instead, a 'pseudo-existential' used in this way is more like a bundle of constraints upon a type variable.
 
 	```swift
-	func myFunc<T>(x: T) where T : Any<class, FooProtocol, BarProtocol> { ... }
+	func myFunc<T>(x: T) where T : class & FooProtocol & BarProtocol { ... }
 
 	// Is exactly synonymous with:
 	// func myFunc<T>(x: T) where T : AnyObject, T : FooProtocol, T : BarProtocol { ... }
@@ -559,12 +584,12 @@ Existentials can be used in generic declarations in the following ways:
 	```swift
 	// A collection containing collections that have customized descriptions;
 	// these collections in turn contain Ints.
-	let a : Any<Collection where .Element : CustomStringConvertible, .Element : Collection, .Element.Element == Int>
+	let a : Collection where .Element : CustomStringConvertible, .Element : Collection, .Element.Element == Int
 
 	// becomes...
-	typealias IntCollection = Any<Collection where .Element == Int>
+	typealias IntCollection = Collection where .Element == Int
 
-	let b : Any<Collection where .Element : Any<IntCollection, CustomStringConvertible>>
+	let b : Collection where .Element : IntCollection & CustomStringConvertible
 	```
 
 Existentials cannot be used with generics in the following ways:
@@ -573,7 +598,7 @@ Existentials cannot be used with generics in the following ways:
 
 	```swift
 	// NOT ALLOWED
-	func foo<A, B>(x: A, y: B) -> Any<A, B> { ... }
+	func foo<A, B>(x: A, y: B) -> A & B { ... }
 	```
 
 * Passed as arguments of generic type `T` to generic functions, unless `T` is completely unconstrained and the argument's type is `T` or a generic type covariant on `T`.
@@ -582,13 +607,15 @@ Existentials cannot be used with generics in the following ways:
 
 In addition to guarantees provided by the existential at the point of definition, the dynamic `as?` cast should also be able to cast an existential at a use site.
 
+Note that when casting a value to an existential type with a `where` clause with more than one constraint, the existential type must be spelled out in parentheses in order to disambiguate between commas used to separate `where` constraints, and commas used to separate clauses in the `if let` or `if case` statement.
+
 ```swift
 // No information on FooProtocol's associated types at compile time
-let a : Any<FooProtocol>
+let a : FooProtocol
 
 // ...
 
-if let narrowedA = a as? Any<FooProtocol where .AssocA == MyStreamer, .AssocB == Bool> {
+if let narrowedA = a as? (FooProtocol where .AssocA == MyStreamer, .AssocB == Bool) {
 	// Now we know what types AssocA and AssocB are, and can use second()
 	let x : MyStreamer = narrowedA.second(true)
 }
@@ -597,11 +624,11 @@ if let narrowedA = a as? Any<FooProtocol where .AssocA == MyStreamer, .AssocB ==
 Note that `as?` casts which are guaranteed to fail and can be deduced as such at compile-time are prohibited:
 
 ```swift
-let a : Any<FooProtocol where .AssocB == Int>
+let a : FooProtocol where .AssocB == Int
 
 // NOT ALLOWED; the compiler can see that the requirements are mutually
 // exclusive at runtime and will error.
-if let narrowedA = a as? Any<FooProtocol where .AssocB == String> {
+if let narrowedA = a as? (FooProtocol where .AssocB == String) {
 	// ...
 }
 ```
@@ -609,18 +636,18 @@ if let narrowedA = a as? Any<FooProtocol where .AssocB == String> {
 Casting does not preserve relationships that were in the original type but aren't expressed in the casted-to type, as per expected type-casting semantics. (This also implies that an existential `A` can be dynamically cast to another existential `B` that isn't a subtype of `A`, and is completely okay.)
 
 ```swift
-let a : Any<FooProtocol>
+let a : FooProtocol
 
 // This is fine
 a.someFooProtocolMethod()
 
-if let narrowedA = a as? Any<BazProtocol> {
+if let narrowedA = a as? BazProtocol {
 	// Can no longer call a FooProtocol method on narrowedA:
 	narrowedA.someFooProtocolMethod() // DOES NOT WORK
 	narrowedA.someBazProtocolMethod() // fine
 }
 
-if let narrowedA = as as? Any<FooProtocol, BazProtocol> {
+if let narrowedA = as as? FooProtocol & BazProtocol {
 	// Can now do both.
 	narrowedA.someFooProtocolMethod() // fine
 	narrowedA.someBazProtocolMethod() // fine
@@ -631,12 +658,12 @@ Here is an example of how `as?` casting can be used to do 'useful' work at runti
 
 ```swift
 // Set the first element of a string or integer collection to some value.
-func setFirstElement(collection: Any<Collection>, theInt: Int, theString: String) -> Bool {
+func setFirstElement(collection: Collection, theInt: Int, theString: String) -> Bool {
 	guard !collection.isEmpty else { return false }
 
-	if let intCollection = collection as? Any<Collection where .Element == Int> {
+	if let intCollection = collection as? Collection where .Element == Int {
 		intCollection[0] = theInt
-	} else if let stringCollection = collection as? Any<Collection where .Element == String> {
+	} else if let stringCollection = collection as? Collection where .Element == String> {
 		stringCollection[0] = theString
 	} else {
 		return false
@@ -650,8 +677,8 @@ func setFirstElement(collection: Any<Collection>, theInt: Int, theString: String
 In addition to associated types, every existential has access to the `.Self` type, which reflects the underlying concrete type of the existential. This `.Self` type can be used to bridge existential types to generic types:
 
 ```swift
-let a : Any<Collection where .Element == Int> = // ...
-let b : Any<Collection where .Element == Int> = // ...
+let a : Collection where .Element == Int = // ...
+let b : Collection where .Element == Int = // ...
 
 func someGenericFunc<C : Collection>(x: C, y: C) where C.Element == Int {
 	// ...
@@ -672,8 +699,8 @@ if let openedA = a as? a.Self, let openedB = b as? a.Self {
 If two values are known to be the same concrete type through opening, their associated types are also considered equal:
 
 ```swift
-let a : Any<Collection> = // ...
-let b : Any<Collection> = // ...
+let a : Collection = // ...
+let b : Collection = // ...
 
 func someFunc<C : Collection>(x: C, y: C.Index) {
 	// ...
@@ -692,7 +719,7 @@ if let openedA = a as? a.Self, let openedB = b as? a.Self {
 
 ### Metatype
 
-The metatype of an existential allows for access to any static methods defined across the protocols and classes comprising the existential, and any initializers defined across the protocols comprising the initializer, subject to the accessibility requirements described above in *Associated Types and Member Exposure*. It is defined as `Any<...>.Protocol`, where `...` is replaced by the requirements and `where` clause defined by an existential type.
+The metatype of an existential allows for access to any static methods defined across the protocols and classes comprising the existential, and any initializers defined across the protocols comprising the initializer, subject to the accessibility requirements described above in *Associated Types and Member Exposure*. It is defined as `(...).Protocol`, where `...` is replaced by the requirements and `where` clause defined by an existential type. For example, `(P1 & P2 where .Foo == Int).Protocol`.
 
 Note that existentials containing class requirements are still considered to have metatypes of `Protocol` type. An existential containing class requirements and protocol requirements is not equivalent to just the class described in the class requirement.
 
@@ -712,15 +739,15 @@ For the protocol requirements test, any protocols that are supertypes to other p
 
 For the constraints test, duplicate constraints are discarded (e.g. an associated type is required to conform to both a parent and child protocol); any constraints specific to a parent protocol's associated types are given to the most specific child when that protocol is discarded.
 
-The ordering or presence of nested `Any` requirements is irrelevant; any existential with nested `Any` requirements can be 'flattened' into an exactly equivalent existential without any nested `Any` requirements.
+The ordering or presence of nested existential requirements is irrelevant.
 
 ### Ordering
 
 A type `A` is a *subtype* of another type `B` iff `B` can be used anywhere `A` can without changing the semantics of the program. If, according to the rules outlined below, two non-equivalent types `A` and `B` seem like they would be subtypes of each other (e.g. some rules make `A` a subtype of `B`, and others vice versa), they are not related at all, unless they are equivalent.
 
-Note that for the sake of the descriptions below, any concrete class is considered a subclass of `class`. Therefore, `P<MyClass, Protocol1>` is a subtype of `P<class, Protocol1>`. Also, `Child : Parent` for all type relationships below.
+Note that for the sake of the descriptions below, any concrete class is considered a subclass of `class`. Therefore, `MyClass & Protocol1` is a subtype of `class & Protocol1`. Also, `Child : Parent` for all type relationships below.
 
-* A concrete type that satisfies an existential's requirements is a subtype of that existential. `String` can be used anywhere an `Any<Streamable>` can. 
+* A concrete type that satisfies an existential's requirements is a subtype of that existential. `String` can be used anywhere an `Streamable` can. 
 
 * Existential type `A` is a subtype of existential type `B` if and only if `A` imposes requirements that are at least equivalent to those of `B`. This includes class requirements, protocol requirements, and constraints on associated types.
 
@@ -735,38 +762,6 @@ Note that for the sake of the descriptions below, any concrete class is consider
 * Ceteris paribus, concrete type equality constraints on an associated type are ordered from least specific to most: no constraint, `Parent`, `Child`.
 
 * Ceteris paribus, an existential `A` which imposes a type equality constraint (e.g. `Assoc1 == Assoc2`) on any associated type, is a subtype of an existential `B` that does not impose that type equality constraint. Note that if such a type equality constraint is imposed on `A`, all constraints on `Assoc1` are implicitly imposed on `Assoc2`, and all constraints on `Assoc2` are implicitly imposed on `Assoc1` for the purposes of determining whether other existentials are subtypes of `A`.
-
-### Grammar
-
-This grammar is preliminary, and is provided only as a guide to understanding the structure of the new constructs described above. I regret any errors.
-
-*any-existential* → `Any<` *requirement-list*<sub>opt</sub> `>`
-
-*requirement-list* → *base-requirement-list* *where-clause*<sub>opt</sub>
-
-*base-requirement-list* → *requirement* | *requirement* `,` *base-requirement-list*
-
-*requirement* → *any-class-requirement* | *class-requirement* | *protocol-requirement* | *any-existential*
-
-*any-class-requirement* → `class`
-
-*class-requirement* → `type-name` (name of a class)
-
-*protocol-requirement* → `type-name` (name of a protocol)
-
-*where-clause* → *requirement-clause* (see *The Swift Programming Language*)
-
-## Future Directions
-
-In addition to adding capabilities to Swift directly, this proposal lays the groundwork for other proposals which fit into the Completing Generics constellation.
-
-### Additional 'kind' (value/reference/etc) constraints
-
-Currently, Swift supports only the generic `class` constraint, for specifying "any class". Additional constraints, such as `struct`, `enum`, and/or `value`, might be proposed in the future. If so, retrofitting them to work with this proposal should be conceptually simple: for example, one can imagine an 'any-struct' counterpart to the existing 'any-class' requirement.
-
-### Bottom type support
-
-Some discussion participants expressed interest in a bottom type for Swift (a type that is considered a subtype for all other types, much like how `Any` is a top type). If such a type is ever implemented, a follow-up proposal can relax existential semantics in a way that any existential defined with contradicting constraints (such as `Any<Int, String>`) is considered synonymous to that bottom type. We could then allow existential requirements to be built out of generic type parameters, with any such 'contradicting' constraints resulting in an existential of the bottom type.
 
 ## Impact on existing code
 
